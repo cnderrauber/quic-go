@@ -608,6 +608,11 @@ runLoop:
 				// nothing to see here.
 			case <-sendQueueAvailable:
 			case firstPacket := <-s.receivedPackets:
+				if !isEqualUdpAddr(s.conn.RemoteAddr(), firstPacket.remoteAddr) {
+					ret := s.sendQueue.ChangeAddr(&netAddrInfo{addr: firstPacket.remoteAddr, info: firstPacket.info})
+					s.logger.Debugf("==== change src addr from:%v to:%v ret:%v",
+						s.conn.RemoteAddr(), firstPacket.remoteAddr, ret)
+				}
 				wasProcessed := s.handlePacketImpl(firstPacket)
 				// Don't set timers and send packets if the packet made us close the session.
 				select {
@@ -1991,4 +1996,21 @@ func (s *session) NextSession() Session {
 	<-s.HandshakeComplete().Done()
 	s.streamsMap.UseResetMaps()
 	return s
+}
+
+func isEqualUdpAddr(a, b net.Addr) bool {
+	if a != b {
+		udpA, okA := a.(*net.UDPAddr)
+		udpB, okB := b.(*net.UDPAddr)
+		if !okA || !okB {
+			return false
+		}
+		if udpA.Port != udpB.Port {
+			return false
+		}
+
+		return bytes.Compare(udpA.IP, udpB.IP) == 0
+	}
+
+	return true
 }

@@ -1,11 +1,21 @@
 package quic
 
+import (
+	"net"
+)
+
 type sender interface {
 	Send(p *packetBuffer)
 	Run() error
 	WouldBlock() bool
 	Available() <-chan struct{}
 	Close()
+	ChangeAddr(addr *netAddrInfo) bool
+}
+
+type netAddrInfo struct {
+	addr net.Addr
+	info *packetInfo
 }
 
 type sendQueue struct {
@@ -14,6 +24,7 @@ type sendQueue struct {
 	runStopped  chan struct{} // runStopped when the run loop returns
 	available   chan struct{}
 	conn        sendConn
+	changeAddr  chan *netAddrInfo
 }
 
 var _ sender = &sendQueue{}
@@ -27,6 +38,7 @@ func newSendQueue(conn sendConn) sender {
 		closeCalled: make(chan struct{}),
 		available:   make(chan struct{}, 1),
 		queue:       make(chan *packetBuffer, sendQueueCapacity),
+		changeAddr:  make(chan *netAddrInfo, 1),
 	}
 }
 
@@ -71,7 +83,18 @@ func (h *sendQueue) Run() error {
 			case h.available <- struct{}{}:
 			default:
 			}
+		case changeAddr := <-h.changeAddr:
+			h.conn.SetRemoteAddr(changeAddr.addr, changeAddr.info)
 		}
+	}
+}
+
+func (h *sendQueue) ChangeAddr(addr *netAddrInfo) bool {
+	select {
+	case h.changeAddr <- addr:
+		return true
+	default:
+		return false
 	}
 }
 
